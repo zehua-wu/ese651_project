@@ -39,6 +39,9 @@ from scipy.spatial.transform import Rotation as R
 # Import strategy class
 from .quadcopter_strategies import DefaultQuadcopterStrategy
 
+
+
+
 ##
 # Drone config
 ##
@@ -49,10 +52,10 @@ CRAZYFLIE_CFG = ArticulationCfg(
     prim_path="{ENV_REGEX_NS}/Robot",
     collision_group=0,
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"usd/cf2x.usda",
+        usd_path=f"usd/cf2x.usda",  # drone's geometry, rigid bodystructure comes from usd file
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
+            disable_gravity=False,  # has gravity
             max_depenetration_velocity=10.0,
             enable_gyroscopic_forces=True,
         ),
@@ -68,7 +71,7 @@ CRAZYFLIE_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.5),
         joint_pos={
-            ".*": 0.0,
+            ".*": 0.0,  # regular expression for all joints set to 0 position
         },
         joint_vel={
             "m1_joint": 200.0,
@@ -91,6 +94,7 @@ R2D = 180.0 / np.pi
 PLOT_UPDATE_FREQ = 5
 
 
+# visualize sphere for the racing task's sequential gate center
 GOAL_MARKER_CFG = VisualizationMarkersCfg(
     markers={
         "sphere": sim_utils.SphereCfg(
@@ -99,6 +103,8 @@ GOAL_MARKER_CFG = VisualizationMarkersCfg(
         ),
     }
 )
+
+
 
 class QuadcopterEnvWindow(BaseEnvWindow):
     """Window manager for the Quadcopter environment."""
@@ -118,29 +124,45 @@ class QuadcopterEnvWindow(BaseEnvWindow):
                     # add command manager visualization
                     self._create_debug_vis_ui_element("targets", self.env)
 
+
+
+
+
+
 @dataclass
 class GateModelCfg:
-    usd_path: str = "./usd/gate.usda"
+    # reused for several gates
+    usd_path: str = "./usd/gate.usda"   # gate's geometry, rigid bodystructure comes from usd file
     prim_name: str = "gate"
     gate_side: float = 1.0
     scale = [1.0, gate_side, gate_side]
+
 
 @configclass
 class QuadcopterEnvCfg(DirectRLEnvCfg):
     use_wall = False
     track_name = 'powerloop'
 
-    # env
+    ### env-level params
+
+    # each episode is 30 seconds long
     episode_length_s = 30.0             # episode_length = episode_length_s / dt / decimation
+
+    # action space is in 4-dim vector
     action_space = 4
+
+    # not relevant for this task, just needs to exist for Gymnasium compatibility
+    # real observation space is chosen by in strategy file
     observation_space = 1 # inconsequential, just needs to exist for Gymnasium compatibility
+
+
     state_space = 0
     debug_vis = True
 
-    sim_rate_hz = 500
-    policy_rate_hz = 50
-    pid_loop_rate_hz = 500
-    decimation = sim_rate_hz // policy_rate_hz
+    sim_rate_hz = 500 # dt = 0.002 s, 1 second has 500 simulation steps
+    policy_rate_hz = 50 # dpolicy = 0.02 s, 1 second has 50 policy steps
+    pid_loop_rate_hz = 500 # 1 second has 500 pid loop steps
+    decimation = sim_rate_hz // policy_rate_hz # 10 simulation steps per policy functions on
     pid_loop_decimation = sim_rate_hz // pid_loop_rate_hz
 
     ui_window_class_type = QuadcopterEnvWindow
@@ -148,7 +170,7 @@ class QuadcopterEnvCfg(DirectRLEnvCfg):
     # simulation
     sim: SimulationCfg = SimulationCfg(
         dt=1 / sim_rate_hz,
-        render_interval=decimation,
+        render_interval=decimation,  # render every 10 simulation steps
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -180,7 +202,7 @@ class QuadcopterEnvCfg(DirectRLEnvCfg):
         prim_path="/World/envs/env_.*/Robot",
     )
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/body",
+        prim_path="/World/envs/env_.*/Robot/body",  # contact sensor is attached to the drone's body
         update_period=0.0,
         history_length=6,
         debug_vis=False,
@@ -232,7 +254,14 @@ class QuadcopterEnvCfg(DirectRLEnvCfg):
     # Strategy class for custom rewards, observations, and resets
     strategy_class: type[DefaultQuadcopterStrategy] = DefaultQuadcopterStrategy
 
+
+
+
+
+
+
 class QuadcopterEnv(DirectRLEnv):
+    # a specific RL env by QuadcopterCfg to build
     cfg: QuadcopterEnvCfg
 
     def __init__(self, cfg: QuadcopterEnvCfg, render_mode: str | None = None, **kwargs):
@@ -244,6 +273,9 @@ class QuadcopterEnv(DirectRLEnv):
 
         self.iteration = 0
 
+
+        # check if pass the defined rewards fields from outside, if not, raise an error because we 
+        # leave blank rewards in the cfg file for not hardcoded but passed by users in train_race.py
         if len(cfg.rewards) > 0:
             self.rew = cfg.rewards
         elif self.cfg.is_train:
@@ -367,6 +399,8 @@ class QuadcopterEnv(DirectRLEnv):
         self.goal_pos_visualizer.visualize(self._desired_pos_w)
 
     def _setup_scene(self):
+        # build up the world scene
+
         self._robot = Articulation(self.cfg.robot)
         self.scene.articulations["robot"] = self._robot
 
@@ -570,6 +604,7 @@ class QuadcopterEnv(DirectRLEnv):
                 head_primvars_api.CreatePrimvar("primvars:displayColor", Sdf.ValueTypeNames.Color3fArray, UsdGeom.Tokens.constant).Set([arrow_color_gf])
 
     def _compute_motor_speeds(self, wrench_des):
+        # take total desired wrench as input and compute needed motor speeds for each motor
         f_des = torch.matmul(wrench_des, self.TM_to_f.t())
         motor_speed_squared = f_des / self.cfg.k_eta
         motor_speeds_des = torch.sign(motor_speed_squared) * torch.sqrt(torch.abs(motor_speed_squared))
@@ -693,6 +728,7 @@ class QuadcopterEnv(DirectRLEnv):
 
     def _get_rewards(self) -> torch.Tensor:
         """Calculate rewards using the strategy pattern."""
+        """ standard api and detail reward computation are in the strategy file """
         return self.strategy.get_rewards()
 
     def _reset_idx(self, env_ids: torch.Tensor | None):

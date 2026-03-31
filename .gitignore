@@ -1,4 +1,4 @@
-**/logs/*
+
 **/outputs/*
 **/wandb/*
 
@@ -16,5 +16,4 @@
 
 # RL-Games
 **/runs/*
-**/logs/*
 **/recordings/*

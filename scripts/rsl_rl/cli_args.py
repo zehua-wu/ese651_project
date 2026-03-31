@@ -3,6 +3,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+
+""" parse CLI arguments """
+
 from __future__ import annotations
 
 import argparse

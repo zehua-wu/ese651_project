@@ -7,10 +7,18 @@
 
 """Launch Isaac Sim Simulator first."""
 
+import pickle
 import sys
 import os
 
-local_rsl_path = os.path.abspath("src/third_parties/rsl_rl_local")
+# Project root contains `src/` (isaac_quad_sim2real, etc.); cwd may be scripts/rsl_rl.
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+print(sys.path)
+
+local_rsl_path = os.path.join(_PROJECT_ROOT, "src", "third_parties", "rsl_rl_local")
 if os.path.exists(local_rsl_path):
     sys.path.insert(0, local_rsl_path)
     print(f"[INFO] Using local rsl_rl from: {local_rsl_path}")
@@ -64,7 +72,16 @@ from isaaclab.envs import (
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import dump_pickle, dump_yaml
+from isaaclab.utils.io import dump_yaml
+
+
+def dump_pickle(filename: str, data: object) -> None:
+    """Save object to pickle (Isaac Lab removed isaaclab.utils.io.dump_pickle)."""
+    dirname = os.path.dirname(filename)
+    if dirname and not os.path.exists(dirname):
+        os.makedirs(dirname, exist_ok=True)
+    with open(filename, "wb") as f:
+        pickle.dump(data, f)
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
@@ -72,7 +89,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 
 # Import extensions to set up environment tasks
-import src.isaac_quad_sim2real.tasks   # noqa: F401
+import src.isaac_quad_sim2real.tasks  # noqa: F401
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -106,16 +123,78 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     log_dir = os.path.join(log_root_path, log_dir)
 
     # TODO ----- START ----- Define rewards scales
-    # reward scales
-    progress_goal_reward_scale = 50.0
-    crash_reward = -1.0
-    death_cost = -10.0
+    #reward scales
+    # progress_goal_reward_scale = 50.0
+    # crash_reward = -1.0
+    # death_cost = -10.0
 
+    # rewards = {
+    #     'progress_goal_reward_scale': progress_goal_reward_scale,
+    #     'crash_reward_scale': crash_reward,
+    #     'death_cost': death_cost,
+    # }
+
+    progress_gate_reward_scale = 1.5         # Reward for getting closer to gate
+    gate_pass_reward_scale = 10.0             # Large bonus for passing through gate
+    velocity_forward_reward_scale = 4.0#1.0       # Encourage fast forward motion
+
+    # Orientation and navigation (medium weight)
+    heading_alignment_reward_scale = 0.5#0.3      # Reward for pointing toward gate
+
+    # Stability and control (low weight - penalize bad behavior)
+    tilt_reward_scale = 0.1                   # Penalize excessive roll/pitch
+    ang_vel_reward_scale = 0.04               # Penalize excessive angular velocity
+    tilt_reward_scale = 0.1                   # Penalize excessive roll/pitch
+    ang_vel_reward_scale = 0.04               # Penalize excessive angular velocity
+    height_reward_scale = 0.3                 # Penalize deviating from target height
+
+    # Safety (high penalty)
+    crash_reward_scale = 6.0                  # Penalty for crashing
+    death_cost = -50.0                        # Large penalty for episode termination
+    wrong_direction_reward_scale = 5.0        # Penalty for passing gate in wrong direction
+
+    backward_reward_scale = 0.2#1.5
+
+    step_reward_scale = 4.0
+    lap_time_reward_scale = 5.0
+
+    speed_reward_scale = 1.5 
+    lap_bonus_reward_scale = 5.0
+    entry_angle_reward_scale = 4.0
+    velocity_next_reward_scale = 0.5
+    early_accel_reward_scale = 2.0
+
+    step_reward_scale = 4.0
+    lap_time_reward_scale = 5.0
+
+    speed_reward_scale = 1.5 
+
+    # Assemble rewards dictionary
     rewards = {
-        'progress_goal_reward_scale': progress_goal_reward_scale,
-        'crash_reward_scale': crash_reward,
+        'progress_gate_reward_scale': progress_gate_reward_scale,
+        'gate_pass_reward_scale': gate_pass_reward_scale,
+        'velocity_forward_reward_scale': velocity_forward_reward_scale,
+        # 'heading_alignment_reward_scale': heading_alignment_reward_scale,
+        # 'heading_alignment_reward_scale': heading_alignment_reward_scale,
+        'tilt_reward_scale': tilt_reward_scale,
+        'ang_vel_reward_scale': ang_vel_reward_scale,
+        # 'height_reward_scale': height_reward_scale,
+        # 'height_reward_scale': height_reward_scale,
+        'crash_reward_scale': crash_reward_scale,
+        'wrong_direction_reward_scale': wrong_direction_reward_scale,
         'death_cost': death_cost,
+        # 'backward_reward_scale': backward_reward_scale,
+        # 'step_reward_scale': step_reward_scale,
+        'lap_time_reward_scale': lap_time_reward_scale,
+        'speed_reward_scale': speed_reward_scale,
+        # 'backward_reward_scale': backward_reward_scale,
+        # 'step_reward_scale': step_reward_scale,
+        'lap_bonus_reward_scale' : lap_bonus_reward_scale,
+        # 'entry_angle_reward_scale' : entry_angle_reward_scale,
+        # 'velocity_next_reward_scale' : velocity_next_reward_scale,
+        # 'early_accel_reward_scale': early_accel_reward_scale,
     }
+
     # TODO ----- END -----
 
     env_cfg.is_train = True

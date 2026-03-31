@@ -1,0 +1,400 @@
+--- git status ---
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   scripts/rsl_rl/play_race.py
+	modified:   scripts/rsl_rl/train_race.py
+	modified:   src/third_parties/rsl_rl_local/rsl_rl/algorithms/ppo.py
+	modified:   src/third_parties/rsl_rl_local/rsl_rl/utils/wandb_utils.py
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/scripts/rsl_rl/play_race.py b/scripts/rsl_rl/play_race.py
+index d8401e8..e60776e 100644
+--- a/scripts/rsl_rl/play_race.py
++++ b/scripts/rsl_rl/play_race.py
+@@ -66,6 +66,11 @@ from isaaclab_rl.rsl_rl import (
+     export_policy_as_onnx,
+ )
+ 
++# Re-add project root to sys.path after AppLauncher may have reset it
++_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
++if _project_root not in sys.path:
++    sys.path.insert(0, _project_root)
++
+ # Import extensions to set up environment tasks
+ import src.isaac_quad_sim2real.tasks   # noqa: F401
+ 
+diff --git a/scripts/rsl_rl/train_race.py b/scripts/rsl_rl/train_race.py
+index f420fc9..a3bd98d 100644
+--- a/scripts/rsl_rl/train_race.py
++++ b/scripts/rsl_rl/train_race.py
+@@ -64,13 +64,21 @@ from isaaclab.envs import (
+     multi_agent_to_single_agent,
+ )
+ from isaaclab.utils.dict import print_dict
+-from isaaclab.utils.io import dump_pickle, dump_yaml
++
++import pickle
++from isaaclab.utils.io import dump_yaml
++
+ 
+ import isaaclab_tasks  # noqa: F401
+ from isaaclab_tasks.utils import get_checkpoint_path
+ from isaaclab_tasks.utils.hydra import hydra_task_config
+ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+ 
++# Re-add project root to sys.path after AppLauncher may have reset it
++_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
++if _project_root not in sys.path:
++    sys.path.insert(0, _project_root)
++
+ # Import extensions to set up environment tasks
+ import src.isaac_quad_sim2real.tasks   # noqa: F401
+ 
+@@ -160,8 +168,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
+     # dump the configuration into log-directory
+     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
+     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+-    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
+-    dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
++    with open(os.path.join(log_dir, "params", "env.pkl"), "wb") as _f: pickle.dump(env_cfg, _f)
++    with open(os.path.join(log_dir, "params", "agent.pkl"), "wb") as _f: pickle.dump(agent_cfg, _f)
+ 
+     # run training
+     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+diff --git a/src/third_parties/rsl_rl_local/rsl_rl/algorithms/ppo.py b/src/third_parties/rsl_rl_local/rsl_rl/algorithms/ppo.py
+index 5bb2484..c2d3baf 100644
+--- a/src/third_parties/rsl_rl_local/rsl_rl/algorithms/ppo.py
++++ b/src/third_parties/rsl_rl_local/rsl_rl/algorithms/ppo.py
+@@ -120,6 +120,249 @@ class PPO:
+             last_values, self.gamma, self.lam, normalize_advantage=not self.normalize_advantage_per_mini_batch
+         )
+ 
++    # def update(self):
++    #     mean_value_loss = 0
++    #     mean_surrogate_loss = 0
++    #     mean_entropy = 0
++
++    #     # generator for mini batches
++    #     if self.actor_critic.is_recurrent:
++    #         generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
++    #     else:
++    #         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
++
++    #     # iterate over batches
++    #     for (
++    #         observations,
++    #         critic_observations,
++    #         sampled_actions,
++    #         value_targets,
++    #         advantage_estimates,
++    #         discounted_returns,
++    #         prev_log_probs,
++    #         prev_mean_actions,
++    #         prev_action_stds,
++    #         hidden_states,
++    #         episode_masks,
++    #         _,  # rnd_state_batch - not used anymore
++    #     ) in generator:
++    #         # TODO ----- START -----
++    #         # Implement the PPO update step
++    #         # TODO ----- END -----
++
++    #     num_updates = self.num_learning_epochs * self.num_mini_batches
++    #     mean_value_loss /= num_updates
++    #     mean_surrogate_loss /= num_updates
++    #     mean_entropy /= num_updates
++    #     # Clear the storage
++    #     self.storage.clear()
++
++    #     return mean_value_loss, mean_surrogate_loss, mean_entropy
++
++
++    # def update(self):
++    #     mean_value_loss = 0
++    #     mean_surrogate_loss = 0
++    #     mean_entropy = 0
++
++    #     if self.actor_critic.is_recurrent:
++    #         generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
++    #     else:
++    #         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
++
++    #     for (
++    #         observations,
++    #         critic_observations,
++    #         sampled_actions,
++    #         value_targets,
++    #         advantage_estimates,
++    #         discounted_returns,
++    #         prev_log_probs,
++    #         prev_mean_actions,
++    #         prev_action_stds,
++    #         hidden_states,
++    #         episode_masks,
++    #         _,
++    #     ) in generator:
++
++    #         # TODO ----- START -----
++
++    #         # ── 1. Re-evaluate actions under the current policy ──────────────────
++    #         self.actor_critic.act(observations, masks=episode_masks, hidden_states=hidden_states)
++    #         actions_log_prob = self.actor_critic.get_actions_log_prob(sampled_actions)
++    #         value_estimates   = self.actor_critic.evaluate(critic_observations,
++    #                                                     masks=episode_masks,
++    #                                                     hidden_states=hidden_states)
++    #         mu                = self.actor_critic.action_mean
++    #         sigma             = self.actor_critic.action_std
++    #         entropy           = self.actor_critic.entropy
++
++    #         # ── 2. Adaptive KL learning-rate schedule ────────────────────────────
++    #         if self.desired_kl is not None and self.schedule == "adaptive":
++    #             with torch.inference_mode():
++    #                 kl = torch.sum(
++    #                     torch.log(sigma / prev_action_stds + 1e-5)
++    #                     + (prev_action_stds**2 + (prev_mean_actions - mu)**2) / (2.0 * sigma**2)
++    #                     - 0.5,
++    #                     dim=-1,
++    #                 ).mean()
++    #             # Increase lr if KL is too small, decrease if too large
++    #             if kl < self.desired_kl / 2.0 and kl > 0.0:
++    #                 self.learning_rate = min(1e-2, self.learning_rate * 1.5)
++    #             elif kl > self.desired_kl * 2.0:
++    #                 self.learning_rate = max(1e-5, self.learning_rate / 1.5)
++    #             for param_group in self.optimizer.param_groups:
++    #                 param_group["lr"] = self.learning_rate
++
++    #         # ── 3. Normalize advantages (per mini-batch, optional) ────────────────
++    #         if self.normalize_advantage_per_mini_batch:
++    #             advantage_estimates = (advantage_estimates - advantage_estimates.mean()) / (
++    #                 advantage_estimates.std() + 1e-8
++    #             )
++
++    #         # ── 4. Surrogate (policy) loss ────────────────────────────────────────
++    #         # Importance sampling ratio  r_t(θ) = π_θ(a|s) / π_θ_old(a|s)
++    #         ratio = torch.exp(actions_log_prob - torch.squeeze(prev_log_probs))
++
++    #         surrogate          = -torch.squeeze(advantage_estimates) * ratio
++    #         surrogate_clipped  = -torch.squeeze(advantage_estimates) * torch.clamp(
++    #             ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
++    #         )
++    #         surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
++
++    #         # ── 5. Value loss ─────────────────────────────────────────────────────
++    #         if self.use_clipped_value_loss:
++    #             # value_targets  = old V(s) predictions (clip anchor)
++    #             # discounted_returns = actual return R (regression target)
++    #             value_clipped = value_targets + torch.clamp(
++    #                 value_estimates - value_targets,
++    #                 -self.clip_param,
++    #                 self.clip_param,
++    #             )
++    #             value_loss_raw     = (value_estimates - discounted_returns).pow(2)
++    #             value_loss_clipped = (value_clipped   - discounted_returns).pow(2)
++    #             value_loss = torch.max(value_loss_raw, value_loss_clipped).mean()
++    #         else:
++    #             value_loss = (discounted_returns - value_estimates).pow(2).mean()
++
++    #         # ── 6. Total loss and gradient step ───────────────────────────────────
++    #         loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
++
++    #         self.optimizer.zero_grad()
++    #         loss.backward()
++    #         nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
++    #         self.optimizer.step()
++
++    #         # ── 7. Accumulate statistics ──────────────────────────────────────────
++    #         mean_value_loss     += value_loss.item()
++    #         mean_surrogate_loss += surrogate_loss.item()
++    #         mean_entropy        += entropy.mean().item()
++
++    #         # TODO ----- END -----
++
++    #     num_updates = self.num_learning_epochs * self.num_mini_batches
++    #     mean_value_loss     /= num_updates
++    #     mean_surrogate_loss /= num_updates
++    #     mean_entropy        /= num_updates
++    #     self.storage.clear()
++
++    #     return mean_value_loss, mean_surrogate_loss, mean_entropy
++
++
++
++    # def update(self):
++    #     mean_value_loss = 0
++    #     mean_surrogate_loss = 0
++    #     mean_entropy = 0
++    #     # generator for mini batches
++    #     if self.actor_critic.is_recurrent:
++    #         generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
++    #     else:
++    #         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
++    #     # iterate over batches
++    #     for (
++    #         observations,
++    #         critic_observations,
++    #         sampled_actions,
++    #         value_targets,
++    #         advantage_estimates,
++    #         discounted_returns,
++    #         prev_log_probs,
++    #         prev_mean_actions,
++    #         prev_action_stds,
++    #         hidden_states,
++    #         episode_masks,
++    #         _,  # rnd_state_batch - not used anymore
++    #     ) in generator:
++    #         # TODO ----- START -----
++    #         # Recompute action log probs, entropy, and value
++    #         self.actor_critic.act(observations)
++    #         actions_log_prob = self.actor_critic.get_actions_log_prob(sampled_actions)
++    #         values = self.actor_critic.evaluate(critic_observations)
++    #         entropy = self.actor_critic.entropy
++    #         mu = self.actor_critic.action_mean
++    #         sigma = self.actor_critic.action_std
++
++    #         # --- Adaptive KL learning-rate schedule ---
++    #         if self.desired_kl is not None and self.schedule == "adaptive":
++    #             with torch.inference_mode():
++    #                 kl = torch.sum(
++    #                     torch.log(sigma / prev_action_stds + 1e-5)
++    #                     + (prev_action_stds**2 + (prev_mean_actions - mu)**2) / (2.0 * sigma**2)
++    #                     - 0.5,
++    #                     dim=-1,
++    #                 ).mean()
++    #             if kl > self.desired_kl * 2.0:
++    #                 self.learning_rate = max(1e-5, self.learning_rate / 1.5)
++    #             elif kl < self.desired_kl / 2.0 and kl > 0.0:
++    #                 self.learning_rate = min(1e-2, self.learning_rate * 1.5)
++    #             for param_group in self.optimizer.param_groups:
++    #                 param_group["lr"] = self.learning_rate
++
++    #         # --- Surrogate loss ---
++    #         if self.normalize_advantage_per_mini_batch:
++    #             advantage_estimates = (advantage_estimates - advantage_estimates.mean()) / (advantage_estimates.std() + 1e-8)
++    #         ratio = torch.exp(actions_log_prob - torch.squeeze(prev_log_probs))
++    #         surr1 = ratio * torch.squeeze(advantage_estimates)
++    #         surr_clipped = torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * torch.squeeze(advantage_estimates)
++    #         surrogate_loss = -torch.mean(torch.min(surr1, surr_clipped))
++
++    #         # --- Value loss ---
++    #         if self.use_clipped_value_loss:
++    #             value_clipped = value_targets + (values - value_targets).clamp(-self.clip_param, self.clip_param)
++    #             value_losses = (values - discounted_returns).pow(2)
++    #             value_losses_clipped = (value_clipped - discounted_returns).pow(2)
++    #             value_loss = torch.mean(torch.max(value_losses, value_losses_clipped))
++    #         else:
++    #             value_loss = torch.mean((discounted_returns - values).pow(2))
++
++    #         # --- Total loss ---
++    #         entropy_loss = torch.mean(entropy)
++    #         loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_loss
++
++    #         # --- Optimization ---
++    #         self.optimizer.zero_grad()
++    #         loss.backward()
++    #         nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
++    #         self.optimizer.step()
++
++    #         # --- Logging ---
++    #         mean_value_loss += value_loss.item()
++    #         mean_surrogate_loss += surrogate_loss.item()
++    #         mean_entropy += entropy_loss.item()
++
++    #         # TODO ----- END -----
++    #     num_updates = self.num_learning_epochs * self.num_mini_batches
++    #     mean_value_loss /= num_updates
++    #     mean_surrogate_loss /= num_updates
++    #     mean_entropy /= num_updates
++    #     # Clear the storage
++    #     self.storage.clear()
++    #     return mean_value_loss, mean_surrogate_loss, mean_entropy
++
++
++
++
+     def update(self):
+         mean_value_loss = 0
+         mean_surrogate_loss = 0
+@@ -148,6 +391,54 @@ class PPO:
+         ) in generator:
+             # TODO ----- START -----
+             # Implement the PPO update step
++
++            # Recompute action log probs, entropy, and value
++            self.actor_critic.act(observations)
++            actions_log_prob = self.actor_critic.get_actions_log_prob(sampled_actions)
++            values = self.actor_critic.evaluate(critic_observations)
++            entropy = self.actor_critic.entropy
++
++            # --- PPO ratio ---
++            ratio = torch.exp(actions_log_prob - torch.squeeze(prev_log_probs))
++
++            # --- Surrogate loss ---
++            if self.normalize_advantage_per_mini_batch:
++                advantage_estimates = (advantage_estimates - advantage_estimates.mean()) / (advantage_estimates.std() + 1e-8)
++
++            surr1 = ratio * torch.squeeze(advantage_estimates)
++            surr_clipped = torch.clamp(ratio, 1.0 - self.clip_param, 1.0 + self.clip_param) * torch.squeeze(advantage_estimates)
++            surrogate_loss = -torch.mean(torch.min(surr1, surr_clipped))
++
++            # --- Value loss ---
++            if self.use_clipped_value_loss:
++                value_clipped = value_targets + (values - value_targets).clamp(-self.clip_param, self.clip_param)
++                value_losses = (values - discounted_returns).pow(2)
++                value_losses_clipped = (value_clipped - discounted_returns).pow(2)
++                value_loss = torch.mean(torch.max(value_losses, value_losses_clipped))
++            else:
++                value_loss = torch.mean((discounted_returns - values).pow(2))
++
++            # --- Entropy ---
++            entropy_loss = torch.mean(entropy)
++
++            # --- Total loss ---
++            loss = (
++                surrogate_loss
++                + self.value_loss_coef * value_loss
++                - self.entropy_coef * entropy_loss
++            )
++
++            # --- Optimization ---
++            self.optimizer.zero_grad()
++            loss.backward()
++            nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
++            self.optimizer.step()
++
++            # --- Logging ---
++            mean_value_loss += value_loss.item()
++            mean_surrogate_loss += surrogate_loss.item()
++            mean_entropy += entropy_loss.item()
++            
+             # TODO ----- END -----
+ 
+         num_updates = self.num_learning_epochs * self.num_mini_batches
+@@ -157,4 +448,4 @@ class PPO:
+         # Clear the storage
+         self.storage.clear()
+ 
+-        return mean_value_loss, mean_surrogate_loss, mean_entropy
++        return mean_value_loss, mean_surrogate_loss, mean_entropy
+\ No newline at end of file
+diff --git a/src/third_parties/rsl_rl_local/rsl_rl/utils/wandb_utils.py b/src/third_parties/rsl_rl_local/rsl_rl/utils/wandb_utils.py
+index 25dc24f..da6fea9 100644
+--- a/src/third_parties/rsl_rl_local/rsl_rl/utils/wandb_utils.py
++++ b/src/third_parties/rsl_rl_local/rsl_rl/utils/wandb_utils.py
+@@ -53,7 +53,8 @@ class WandbSummaryWriter(SummaryWriter):
+                 raise
+ 
+         # Change generated name to project-number format
+-        wandb.run.name = project + wandb.run.name.split("-")[-1]
++        if wandb.run is not None and wandb.run.name is not None:
++            wandb.run.name = project + wandb.run.name.split("-")[-1]
+ 
+         self.name_map = {
+             "Train/mean_reward/time": "Train/mean_reward_time",
