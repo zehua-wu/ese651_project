@@ -70,6 +70,55 @@ class DefaultQuadcopterStrategy:
             self.num_envs, dtype=torch.long, device = self.device
         )
 
+
+        # Domain randomization ranges
+        if self.cfg.is_train:
+            # wide ranges for training
+            self._twr_min = self.cfg.thrust_to_weight * 0.75
+            self._twr_max = self.cfg.thrust_to_weight * 1.25
+
+            self._k_aero_xy_min = self.cfg.k_aero_xy * 0.25
+            self._k_aero_xy_max = self.cfg.k_aero_xy * 4.0
+            self._k_aero_z_min  = self.cfg.k_aero_z * 0.25
+            self._k_aero_z_max  = self.cfg.k_aero_z * 4.0
+
+            self._kp_omega_rp_min = self.cfg.kp_omega_rp * 0.60
+            self._kp_omega_rp_max = self.cfg.kp_omega_rp * 1.40
+            self._ki_omega_rp_min = self.cfg.ki_omega_rp * 0.60
+            self._ki_omega_rp_max = self.cfg.ki_omega_rp * 1.40
+            self._kd_omega_rp_min = self.cfg.kd_omega_rp * 0.40
+            self._kd_omega_rp_max = self.cfg.kd_omega_rp * 1.60
+
+            self._kp_omega_y_min = self.cfg.kp_omega_y * 0.60
+            self._kp_omega_y_max = self.cfg.kp_omega_y * 1.40
+            self._ki_omega_y_min = self.cfg.ki_omega_y * 0.60
+            self._ki_omega_y_max = self.cfg.ki_omega_y * 1.40
+            self._kd_omega_y_min = self.cfg.kd_omega_y * 0.40
+            self._kd_omega_y_max = self.cfg.kd_omega_y * 1.60
+        else:
+            # narrow ranges for play
+            self._twr_min = self.cfg.thrust_to_weight * 0.95
+            self._twr_max = self.cfg.thrust_to_weight * 1.05
+
+            self._k_aero_xy_min = self.cfg.k_aero_xy * 0.5
+            self._k_aero_xy_max = self.cfg.k_aero_xy * 2.0
+            self._k_aero_z_min  = self.cfg.k_aero_z * 0.5
+            self._k_aero_z_max  = self.cfg.k_aero_z * 2.0
+
+            self._kp_omega_rp_min = self.cfg.kp_omega_rp * 0.85
+            self._kp_omega_rp_max = self.cfg.kp_omega_rp * 1.15
+            self._ki_omega_rp_min = self.cfg.ki_omega_rp * 0.85
+            self._ki_omega_rp_max = self.cfg.ki_omega_rp * 1.15
+            self._kd_omega_rp_min = self.cfg.kd_omega_rp * 0.70
+            self._kd_omega_rp_max = self.cfg.kd_omega_rp * 1.30
+
+            self._kp_omega_y_min = self.cfg.kp_omega_y * 0.85
+            self._kp_omega_y_max = self.cfg.kp_omega_y * 1.15
+            self._ki_omega_y_min = self.cfg.ki_omega_y * 0.85
+            self._ki_omega_y_max = self.cfg.ki_omega_y * 1.15
+            self._kd_omega_y_min = self.cfg.kd_omega_y * 0.70
+            self._kd_omega_y_max = self.cfg.kd_omega_y * 1.30
+
     def get_rewards(self) -> torch.Tensor:
         """Compute rewards for drone racing through gates with minimal lap time."""
 
@@ -164,6 +213,25 @@ class DefaultQuadcopterStrategy:
         
         crash_penalty = (self.env._crashed > 0).float()
 
+
+        # Low-altitude penalty: penalize descending too fast when flying too low
+        drone_lin_vel_w = self.env._robot.data.root_com_lin_vel_w
+        vz_w = drone_lin_vel_w[:, 2]
+        downward_speed = torch.clamp(-vz_w - 0.3, min=0.0)
+
+        drone_height = self.env._robot.data.root_link_pos_w[:, 2]
+        low_height_mask = (drone_height < 0.35).float()
+
+        downward_velocity_penalty = downward_speed * low_height_mask
+        
+
+        # Command penalty: penalize large actions and abrupt action changes
+        ctrl_magnitude = torch.linalg.norm(self.env._actions, dim=1)
+        ctrl_smoothed = torch.linalg.norm(self.env._actions - self.env._previous_actions, dim=1) ** 2
+        ctrl_penalty = 0.0005 * ctrl_magnitude + 0.0002 * ctrl_smoothed
+
+        
+
         if self.cfg.is_train:
             rewards = {
                 "progress_gate": progress_to_gate * self.env.rew['progress_gate_reward_scale'],
@@ -172,7 +240,10 @@ class DefaultQuadcopterStrategy:
                 "tilt": -tilt_penalty * self.env.rew['tilt_reward_scale'],
                 "ang_vel": -ang_vel_penalty * self.env.rew['ang_vel_reward_scale'],
                 "crash": -crash_penalty * self.env.rew['crash_reward_scale'],
+                # "height": -height_penalty * self.env.rew["height_reward_scale"],
                 "wrong_direction": -wrong_direction_penalty * self.env.rew['wrong_direction_reward_scale'],
+                "low_altitude": -downward_velocity_penalty * self.env.rew["low_altitude_reward_scale"],
+                "ctrl_penalty": -ctrl_penalty * self.env.rew["ctrl_reward_scale"],
             }
             
             reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
@@ -289,7 +360,8 @@ class DefaultQuadcopterStrategy:
 
         # domain randomization
         if self.cfg.is_train:
-            self._randomize_dynamics(env_ids)
+            # self._randomize_dynamics(env_ids)
+            self._randomize_domain(env_ids, self.cfg.randomize_domain)
 
         
         if not self.env._models_paths_initialized:
@@ -436,66 +508,114 @@ class DefaultQuadcopterStrategy:
         self.env._crashed[env_ids] = 0
 
 
-    def _randomize_dynamics(self, env_ids: torch.Tensor):
-        """Domain-randomize dynamics for the given env indices (training only)."""
-        device = self.device
+    # def _randomize_dynamics(self, env_ids: torch.Tensor):
+    #     """Domain-randomize dynamics for the given env indices (training only)."""
+    #     device = self.device
+    #     n = len(env_ids)
+
+    #     r = torch.rand(n, device=device)
+
+    #     twr_min = self.cfg.thrust_to_weight * 0.95
+    #     twr_max = self.cfg.thrust_to_weight * 1.05
+    #     twr_samples = twr_min + r * (twr_max - twr_min)
+    #     self.env._thrust_to_weight[env_ids] = twr_samples
+
+    #     r_xy = torch.rand(n, device=device)
+    #     r_z  = torch.rand(n, device=device)
+
+    #     k_xy_min = self.cfg.k_aero_xy * 0.5
+    #     k_xy_max = self.cfg.k_aero_xy * 2.0
+    #     k_z_min  = self.cfg.k_aero_z * 0.5
+    #     k_z_max  = self.cfg.k_aero_z * 2.0
+
+    #     k_xy = k_xy_min + r_xy * (k_xy_max - k_xy_min)
+    #     k_z  = k_z_min  + r_z  * (k_z_max  - k_z_min)
+
+    #     self.env._K_aero[env_ids, :2] = k_xy.unsqueeze(1)
+    #     self.env._K_aero[env_ids, 2]  = k_z
+
+    #     r_kp_rp = torch.rand(n, device=device)
+    #     r_ki_rp = torch.rand(n, device=device)
+    #     r_kd_rp = torch.rand(n, device=device)
+
+    #     kp_rp_min = self.cfg.kp_omega_rp * 0.85
+    #     kp_rp_max = self.cfg.kp_omega_rp * 1.15
+    #     ki_rp_min = self.cfg.ki_omega_rp * 0.85
+    #     ki_rp_max = self.cfg.ki_omega_rp * 1.15
+    #     kd_rp_min = self.cfg.kd_omega_rp * 0.7
+    #     kd_rp_max = self.cfg.kd_omega_rp * 1.3
+
+    #     kp_rp = kp_rp_min + r_kp_rp * (kp_rp_max - kp_rp_min)
+    #     ki_rp = ki_rp_min + r_ki_rp * (ki_rp_max - ki_rp_min)
+    #     kd_rp = kd_rp_min + r_kd_rp * (kd_rp_max - kd_rp_min)
+
+    #     self.env._kp_omega[env_ids, :2] = kp_rp.unsqueeze(1)
+    #     self.env._ki_omega[env_ids, :2] = ki_rp.unsqueeze(1)
+    #     self.env._kd_omega[env_ids, :2] = kd_rp.unsqueeze(1)
+
+    #     r_kp_y = torch.rand(n, device=device)
+    #     r_ki_y = torch.rand(n, device=device)
+    #     r_kd_y = torch.rand(n, device=device)
+
+    #     kp_y_min = self.cfg.kp_omega_y * 0.85
+    #     kp_y_max = self.cfg.kp_omega_y * 1.15
+    #     ki_y_min = self.cfg.ki_omega_y * 0.85
+    #     ki_y_max = self.cfg.ki_omega_y * 1.15
+    #     kd_y_min = self.cfg.kd_omega_y * 0.7
+    #     kd_y_max = self.cfg.kd_omega_y * 1.3
+
+    #     kp_y = kp_y_min + r_kp_y * (kp_y_max - kp_y_min)
+    #     ki_y = ki_y_min + r_ki_y * (ki_y_max - ki_y_min)
+    #     kd_y = kd_y_min + r_kd_y * (kd_y_max - kd_y_min)
+
+    #     self.env._kp_omega[env_ids, 2] = kp_y
+    #     self.env._ki_omega[env_ids, 2] = ki_y
+    #     self.env._kd_omega[env_ids, 2] = kd_y
+
+
+    def _randomize_domain(self, env_ids: torch.Tensor, randomize: bool):
         n = len(env_ids)
+        dev = self.device
 
-        r = torch.rand(n, device=device)
+        def _uniform(low, high):
+            return torch.empty(n, device=dev).uniform_(low, high)
 
-        twr_min = self.cfg.thrust_to_weight * 0.95
-        twr_max = self.cfg.thrust_to_weight * 1.05
-        twr_samples = twr_min + r * (twr_max - twr_min)
-        self.env._thrust_to_weight[env_ids] = twr_samples
+        if randomize:
+            self.env._thrust_to_weight[env_ids] = _uniform(self._twr_min, self._twr_max)
 
-        r_xy = torch.rand(n, device=device)
-        r_z  = torch.rand(n, device=device)
+            self.env._K_aero[env_ids, 0] = _uniform(self._k_aero_xy_min, self._k_aero_xy_max)
+            self.env._K_aero[env_ids, 1] = _uniform(self._k_aero_xy_min, self._k_aero_xy_max)
+            self.env._K_aero[env_ids, 2] = _uniform(self._k_aero_z_min, self._k_aero_z_max)
 
-        k_xy_min = self.cfg.k_aero_xy * 0.5
-        k_xy_max = self.cfg.k_aero_xy * 2.0
-        k_z_min  = self.cfg.k_aero_z * 0.5
-        k_z_max  = self.cfg.k_aero_z * 2.0
+            rp_kp = _uniform(self._kp_omega_rp_min, self._kp_omega_rp_max)
+            rp_ki = _uniform(self._ki_omega_rp_min, self._ki_omega_rp_max)
+            rp_kd = _uniform(self._kd_omega_rp_min, self._kd_omega_rp_max)
+            self.env._kp_omega[env_ids, 0] = rp_kp
+            self.env._kp_omega[env_ids, 1] = rp_kp
+            self.env._ki_omega[env_ids, 0] = rp_ki
+            self.env._ki_omega[env_ids, 1] = rp_ki
+            self.env._kd_omega[env_ids, 0] = rp_kd
+            self.env._kd_omega[env_ids, 1] = rp_kd
 
-        k_xy = k_xy_min + r_xy * (k_xy_max - k_xy_min)
-        k_z  = k_z_min  + r_z  * (k_z_max  - k_z_min)
+            self.env._kp_omega[env_ids, 2] = _uniform(self._kp_omega_y_min, self._kp_omega_y_max)
+            self.env._ki_omega[env_ids, 2] = _uniform(self._ki_omega_y_min, self._ki_omega_y_max)
+            self.env._kd_omega[env_ids, 2] = _uniform(self._kd_omega_y_min, self._kd_omega_y_max)
+        else:
+            self.env._thrust_to_weight[env_ids] = self.env._twr_value
 
-        self.env._K_aero[env_ids, :2] = k_xy.unsqueeze(1)
-        self.env._K_aero[env_ids, 2]  = k_z
+            self.env._K_aero[env_ids, 0] = self.env._k_aero_xy_value
+            self.env._K_aero[env_ids, 1] = self.env._k_aero_xy_value
+            self.env._K_aero[env_ids, 2] = self.env._k_aero_z_value
 
-        r_kp_rp = torch.rand(n, device=device)
-        r_ki_rp = torch.rand(n, device=device)
-        r_kd_rp = torch.rand(n, device=device)
+            self.env._kp_omega[env_ids, 0] = self.env._kp_omega_rp_value
+            self.env._kp_omega[env_ids, 1] = self.env._kp_omega_rp_value
+            self.env._ki_omega[env_ids, 0] = self.env._ki_omega_rp_value
+            self.env._ki_omega[env_ids, 1] = self.env._ki_omega_rp_value
+            self.env._kd_omega[env_ids, 0] = self.env._kd_omega_rp_value
+            self.env._kd_omega[env_ids, 1] = self.env._kd_omega_rp_value
 
-        kp_rp_min = self.cfg.kp_omega_rp * 0.85
-        kp_rp_max = self.cfg.kp_omega_rp * 1.15
-        ki_rp_min = self.cfg.ki_omega_rp * 0.85
-        ki_rp_max = self.cfg.ki_omega_rp * 1.15
-        kd_rp_min = self.cfg.kd_omega_rp * 0.7
-        kd_rp_max = self.cfg.kd_omega_rp * 1.3
+            self.env._kp_omega[env_ids, 2] = self.env._kp_omega_y_value
+            self.env._ki_omega[env_ids, 2] = self.env._ki_omega_y_value
+            self.env._kd_omega[env_ids, 2] = self.env._kd_omega_y_value
 
-        kp_rp = kp_rp_min + r_kp_rp * (kp_rp_max - kp_rp_min)
-        ki_rp = ki_rp_min + r_ki_rp * (ki_rp_max - ki_rp_min)
-        kd_rp = kd_rp_min + r_kd_rp * (kd_rp_max - kd_rp_min)
-
-        self.env._kp_omega[env_ids, :2] = kp_rp.unsqueeze(1)
-        self.env._ki_omega[env_ids, :2] = ki_rp.unsqueeze(1)
-        self.env._kd_omega[env_ids, :2] = kd_rp.unsqueeze(1)
-
-        r_kp_y = torch.rand(n, device=device)
-        r_ki_y = torch.rand(n, device=device)
-        r_kd_y = torch.rand(n, device=device)
-
-        kp_y_min = self.cfg.kp_omega_y * 0.85
-        kp_y_max = self.cfg.kp_omega_y * 1.15
-        ki_y_min = self.cfg.ki_omega_y * 0.85
-        ki_y_max = self.cfg.ki_omega_y * 1.15
-        kd_y_min = self.cfg.kd_omega_y * 0.7
-        kd_y_max = self.cfg.kd_omega_y * 1.3
-
-        kp_y = kp_y_min + r_kp_y * (kp_y_max - kp_y_min)
-        ki_y = ki_y_min + r_ki_y * (ki_y_max - ki_y_min)
-        kd_y = kd_y_min + r_kd_y * (kd_y_max - kd_y_min)
-
-        self.env._kp_omega[env_ids, 2] = kp_y
-        self.env._ki_omega[env_ids, 2] = ki_y
-        self.env._kd_omega[env_ids, 2] = kd_y
+        self.env._tau_m[env_ids] = self.env._tau_m_value

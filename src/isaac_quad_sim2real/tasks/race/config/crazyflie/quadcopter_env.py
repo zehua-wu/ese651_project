@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+
+GET_DONES_DEBUG = True
+
 import torch
 import numpy as np
 
@@ -251,6 +254,8 @@ class QuadcopterEnvCfg(DirectRLEnvCfg):
 
     rewards = {}
 
+    randomize_domian = True
+
     # Strategy class for custom rewards, observations, and resets
     strategy_class: type[DefaultQuadcopterStrategy] = DefaultQuadcopterStrategy
 
@@ -354,6 +359,30 @@ class QuadcopterEnv(DirectRLEnv):
         self._thrust_to_weight = torch.zeros(self.num_envs, device=self.device)
 
         # Store fixed parameter values
+        # self._twr_value = self.cfg.thrust_to_weight
+        # self._k_aero_xy_value = self.cfg.k_aero_xy * 1.5
+        # self._k_aero_z_value = self.cfg.k_aero_z * 1.5
+        # self._kp_omega_rp_value = self.cfg.kp_omega_rp * 1.05
+        # self._ki_omega_rp_value = self.cfg.ki_omega_rp * 1.05
+        # self._kd_omega_rp_value = self.cfg.kd_omega_rp * 1.15
+        # self._kp_omega_y_value = self.cfg.kp_omega_y * 1.05
+        # self._ki_omega_y_value = self.cfg.ki_omega_y * 1.05
+        # self._kd_omega_y_value = self.cfg.kd_omega_y * 1.15
+        # self._tau_m_value = self.cfg.tau_m
+
+
+        # self._twr_value = self.cfg.thrust_to_weight * 1.05
+        # self._k_aero_xy_value = self.cfg.k_aero_xy * 0.5
+        # self._k_aero_z_value = self.cfg.k_aero_z * 0.5
+        # self._kp_omega_rp_value = self.cfg.kp_omega_rp * 1.15
+        # self._ki_omega_rp_value = self.cfg.ki_omega_rp * 1.15
+        # self._kd_omega_rp_value = self.cfg.kd_omega_rp * 1.3
+        # self._kp_omega_y_value = self.cfg.kp_omega_y * 1.15
+        # self._ki_omega_y_value = self.cfg.ki_omega_y * 1.15
+        # self._kd_omega_y_value = self.cfg.kd_omega_y * 1.3
+        # self._tau_m_value = self.cfg.tau_m
+
+
         self._twr_value = self.cfg.thrust_to_weight
         self._k_aero_xy_value = self.cfg.k_aero_xy
         self._k_aero_z_value = self.cfg.k_aero_z
@@ -723,6 +752,33 @@ class QuadcopterEnv(DirectRLEnv):
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         if not self.cfg.is_train:
             time_out = time_out | ((self._n_gates_passed - 1) // (self._waypoints.shape[0]) >= self.cfg.max_n_laps)
+
+
+        # ---------------- DEBUG PRINTS: add here ----------------
+        if GET_DONES_DEBUG:
+            if torch.any(died):
+                dead_ids = torch.where(died)[0][:10].tolist()
+                print(f"[DONE] died envs (first 10): {dead_ids}")
+
+            if torch.any(cond_crashed):
+                crash_ids = torch.where(cond_crashed)[0][:10].tolist()
+                print(f"[DONE] crashed envs (first 10): {crash_ids}")
+
+            if torch.any(cond_max_h):
+                high_ids = torch.where(cond_max_h)[0][:10].tolist()
+                print(f"[DONE] too high envs (first 10): {high_ids}")
+
+            if torch.any(cond_h_min_time):
+                low_ids = torch.where(cond_h_min_time)[0][:10].tolist()
+                print(f"[DONE] too low/grounded envs (first 10): {low_ids}")
+
+            if torch.any(time_out):
+                timeout_ids = torch.where(time_out)[0][:10].tolist()
+                print(f"[DONE] timeout envs (first 10): {timeout_ids}")
+            # --------------------------------------------------------
+
+
+
 
         return died, time_out
 

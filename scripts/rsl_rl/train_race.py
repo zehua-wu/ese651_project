@@ -144,9 +144,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # Stability and control (low weight - penalize bad behavior)
     tilt_reward_scale = 0.1                   # Penalize excessive roll/pitch
     ang_vel_reward_scale = 0.04               # Penalize excessive angular velocity
-    tilt_reward_scale = 0.1                   # Penalize excessive roll/pitch
-    ang_vel_reward_scale = 0.04               # Penalize excessive angular velocity
-    height_reward_scale = 0.3                 # Penalize deviating from target height
+    # tilt_reward_scale = 0.1                   # Penalize excessive roll/pitch
+    # ang_vel_reward_scale = 0.04               # Penalize excessive angular velocity
+    height_reward_scale = 0.15                 # Penalize deviating from target height
 
     # Safety (high penalty)
     crash_reward_scale = 6.0                  # Penalty for crashing
@@ -155,10 +155,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     backward_reward_scale = 0.2#1.5
 
-    step_reward_scale = 4.0
-    lap_time_reward_scale = 5.0
-
-    speed_reward_scale = 1.5 
     lap_bonus_reward_scale = 5.0
     entry_angle_reward_scale = 4.0
     velocity_next_reward_scale = 0.5
@@ -169,30 +165,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     speed_reward_scale = 1.5 
 
+    low_altitude_reward_scale = 2.0
+
+    ctrl_reward_scale = 1.0
+
     # Assemble rewards dictionary
     rewards = {
         'progress_gate_reward_scale': progress_gate_reward_scale,
         'gate_pass_reward_scale': gate_pass_reward_scale,
         'velocity_forward_reward_scale': velocity_forward_reward_scale,
-        # 'heading_alignment_reward_scale': heading_alignment_reward_scale,
-        # 'heading_alignment_reward_scale': heading_alignment_reward_scale,
         'tilt_reward_scale': tilt_reward_scale,
         'ang_vel_reward_scale': ang_vel_reward_scale,
         # 'height_reward_scale': height_reward_scale,
-        # 'height_reward_scale': height_reward_scale,
         'crash_reward_scale': crash_reward_scale,
         'wrong_direction_reward_scale': wrong_direction_reward_scale,
+        'low_altitude_reward_scale': low_altitude_reward_scale,
         'death_cost': death_cost,
-        # 'backward_reward_scale': backward_reward_scale,
-        # 'step_reward_scale': step_reward_scale,
         'lap_time_reward_scale': lap_time_reward_scale,
         'speed_reward_scale': speed_reward_scale,
-        # 'backward_reward_scale': backward_reward_scale,
-        # 'step_reward_scale': step_reward_scale,
         'lap_bonus_reward_scale' : lap_bonus_reward_scale,
-        # 'entry_angle_reward_scale' : entry_angle_reward_scale,
-        # 'velocity_next_reward_scale' : velocity_next_reward_scale,
-        # 'early_accel_reward_scale': early_accel_reward_scale,
+        'ctrl_reward_scale': ctrl_reward_scale,
     }
 
     # TODO ----- END -----
