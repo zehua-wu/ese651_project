@@ -254,7 +254,7 @@ class QuadcopterEnvCfg(DirectRLEnvCfg):
 
     rewards = {}
 
-    randomize_domian = True
+    randomize_domain = True
 
     # Strategy class for custom rewards, observations, and resets
     strategy_class: type[DefaultQuadcopterStrategy] = DefaultQuadcopterStrategy
