@@ -243,7 +243,7 @@ class DefaultQuadcopterStrategy:
                 # "height": -height_penalty * self.env.rew["height_reward_scale"],
                 "wrong_direction": -wrong_direction_penalty * self.env.rew['wrong_direction_reward_scale'],
                 "low_altitude": -downward_velocity_penalty * self.env.rew["low_altitude_reward_scale"],
-                "ctrl_penalty": -ctrl_penalty * self.env.rew["ctrl_reward_scale"],
+                "ctrl": -ctrl_penalty * self.env.rew["ctrl_reward_scale"],
             }
             
             reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
