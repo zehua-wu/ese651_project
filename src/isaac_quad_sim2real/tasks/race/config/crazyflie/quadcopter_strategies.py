@@ -122,42 +122,106 @@ class DefaultQuadcopterStrategy:
     def get_rewards(self) -> torch.Tensor:
         """Compute rewards for drone racing through gates with minimal lap time."""
 
-        # Check cross in gate local frame
-        crossed_gate_plane = self.env._pose_drone_wrt_gate[:, 0] < 0.2
+        # # Check cross in gate local frame
+        # crossed_gate_plane = self.env._pose_drone_wrt_gate[:, 0] < 0.2
         
-        # Check if drone is within gate shape boundaries
+        # # Check if drone is within gate shape boundaries
+        # within_gate_bounds = (
+        #     (torch.abs(self.env._pose_drone_wrt_gate[:, 1]) < 0.6) &  # Y within gate width
+        #     (torch.abs(self.env._pose_drone_wrt_gate[:, 2]) < 0.6)    # Z within gate height
+        # )
+        
+        # # Check if drone was previously behind the gate 
+        # was_behind_gate = self.env._prev_x_drone_wrt_gate > 0
+
+        # gate_normals = self.env._normal_vectors[self.env._idx_wp, :]  # (num_envs, 3)
+        # vel_along_normal = torch.sum(self.env._robot.data.root_com_lin_vel_w * gate_normals, dim=1)
+        # correct_traversal_direction = vel_along_normal < 0
+
+        # gate_passed = crossed_gate_plane & within_gate_bounds & was_behind_gate & correct_traversal_direction
+
+        # wrong_direction_pass = (
+        #     crossed_gate_plane &
+        #     within_gate_bounds &
+        #     ~correct_traversal_direction &   # velocity is in the wrong direction (+X)
+        #     (vel_along_normal > 0.5)         # threshold to avoid penalizing near-tangential passes
+        # )
+
+
+        current_x = self.env._pose_drone_wrt_gate[:, 0]
+        current_y = self.env._pose_drone_wrt_gate[:, 1]
+        current_z = self.env._pose_drone_wrt_gate[:, 2]
+        prev_x = self.env._prev_x_drone_wrt_gate
+
         within_gate_bounds = (
-            (torch.abs(self.env._pose_drone_wrt_gate[:, 1]) < 0.6) &  # Y within gate width
-            (torch.abs(self.env._pose_drone_wrt_gate[:, 2]) < 0.6)    # Z within gate height
-        )
-        
-        # Check if drone was previously behind the gate 
-        was_behind_gate = self.env._prev_x_drone_wrt_gate > 0
-
-        gate_normals = self.env._normal_vectors[self.env._idx_wp, :]  # (num_envs, 3)
-        vel_along_normal = torch.sum(self.env._robot.data.root_com_lin_vel_w * gate_normals, dim=1)
-        correct_traversal_direction = vel_along_normal < 0
-
-        gate_passed = crossed_gate_plane & within_gate_bounds & was_behind_gate & correct_traversal_direction
-
-        wrong_direction_pass = (
-            crossed_gate_plane &
-            within_gate_bounds &
-            ~correct_traversal_direction &   # velocity is in the wrong direction (+X)
-            (vel_along_normal > 0.5)         # threshold to avoid penalizing near-tangential passes
+            (torch.abs(current_y) < 0.6) &
+            (torch.abs(current_z) < 0.6)
         )
 
-        self.env._prev_x_drone_wrt_gate = self.env._pose_drone_wrt_gate[:, 0].clone()
+        # correct traversal: + -> -
+        gate_passed = (prev_x > 0.0) & (current_x <= 0.0) & within_gate_bounds
+
+        # wrong traversal: - -> +
+        backwards_pass = (prev_x < 0.0) & (current_x >= 0.0) & within_gate_bounds
+
+        # self.env._prev_x_drone_wrt_gate = self.env._pose_drone_wrt_gate[:, 0].clone()
 
         # give gate passing bonus
+        # gate_pass_bonus = gate_passed.float() * 10.0
+
+        # # wrong direction penalty
+        # # wrong_direction_penalty = wrong_direction_pass.float()
+        # wrong_direction_penalty = backwards_pass.float()
+
+        # # identify_backwards_pass = torch.where(backwards_pass)[0]
+        # # if len(identify_backwards_pass) > 0:
+        # #     self.env._crashed[identify_backwards_pass] = 200
+
+
         gate_pass_bonus = gate_passed.float() * 10.0
 
-        # wrong direction penalty
-        wrong_direction_penalty = wrong_direction_pass.float()
+        gate_normals = self.env._normal_vectors[self.env._idx_wp, :]
+        vel_along_normal = torch.sum(self.env._robot.data.root_com_lin_vel_w * gate_normals, dim=1)
+
+        is_wrong_side = current_x < 0.0
+        moving_wrong_way = vel_along_normal > 0.3
+        near_gate_opening = (
+            (torch.abs(current_y) < 0.8) &
+            (torch.abs(current_z) < 0.8)
+        )
+
+        wrong_direction_event = is_wrong_side & moving_wrong_way & near_gate_opening
+        wrong_direction_penalty = wrong_direction_event.float() + 2.0 * backwards_pass.float()
 
         num_gates = self.env._waypoints.shape[0]
 
         # update waypoint for next gate
+        # ids_gate_passed = torch.where(gate_passed)[0]
+        # if len(ids_gate_passed) > 0:
+        #     prev_wp_idx = self.env._idx_wp[ids_gate_passed].clone()
+
+        #     self.env._n_gates_passed[ids_gate_passed] += 1
+        #     self.env._idx_wp[ids_gate_passed] = (self.env._idx_wp[ids_gate_passed] + 1) % num_gates
+
+        #     # lap detection: from last gate to gate 0
+        #     just_completed_lap_mask = (prev_wp_idx == (num_gates - 1))
+        #     lap_done_envs = ids_gate_passed[just_completed_lap_mask]
+        #     if len(lap_done_envs) > 0:
+        #         self._lap_counts[lap_done_envs] += 1
+
+        #     # Update desired positions to next gate
+        #     self.env._desired_pos_w[ids_gate_passed, :2] = self.env._waypoints[self.env._idx_wp[ids_gate_passed], :2]
+        #     self.env._desired_pos_w[ids_gate_passed, 2] = self.env._waypoints[self.env._idx_wp[ids_gate_passed], 2]
+            
+        #     # Update gate-relative pose for new target gate
+        #     self.env._pose_drone_wrt_gate[ids_gate_passed], _ = subtract_frame_transforms(
+        #         self.env._waypoints[self.env._idx_wp[ids_gate_passed], :3],
+        #         self.env._waypoints_quat[self.env._idx_wp[ids_gate_passed], :],
+        #         self.env._robot.data.root_link_state_w[ids_gate_passed, :3]
+        #     )
+
+
+        # Update waypoint for environments that passed the gate
         ids_gate_passed = torch.where(gate_passed)[0]
         if len(ids_gate_passed) > 0:
             prev_wp_idx = self.env._idx_wp[ids_gate_passed].clone()
@@ -172,15 +236,32 @@ class DefaultQuadcopterStrategy:
                 self._lap_counts[lap_done_envs] += 1
 
             # Update desired positions to next gate
-            self.env._desired_pos_w[ids_gate_passed, :2] = self.env._waypoints[self.env._idx_wp[ids_gate_passed], :2]
-            self.env._desired_pos_w[ids_gate_passed, 2] = self.env._waypoints[self.env._idx_wp[ids_gate_passed], 2]
-            
+            new_idx = self.env._idx_wp[ids_gate_passed]
+            self.env._desired_pos_w[ids_gate_passed, :2] = self.env._waypoints[new_idx, :2]
+            self.env._desired_pos_w[ids_gate_passed, 2] = self.env._waypoints[new_idx, 2]
+
             # Update gate-relative pose for new target gate
             self.env._pose_drone_wrt_gate[ids_gate_passed], _ = subtract_frame_transforms(
-                self.env._waypoints[self.env._idx_wp[ids_gate_passed], :3],
-                self.env._waypoints_quat[self.env._idx_wp[ids_gate_passed], :],
+                self.env._waypoints[new_idx, :3],
+                self.env._waypoints_quat[new_idx, :],
                 self.env._robot.data.root_link_state_w[ids_gate_passed, :3]
             )
+
+            # IMPORTANT:
+            # For envs that just switched to a NEW gate, prev_x must be set in the NEW gate frame
+            new_gate_pos = self.env._waypoints[new_idx, :3]
+            new_gate_quat = self.env._waypoints_quat[new_idx, :]
+            new_pose, _ = subtract_frame_transforms(
+                new_gate_pos,
+                new_gate_quat,
+                self.env._robot.data.root_link_state_w[ids_gate_passed, :3]
+            )
+            self.env._prev_x_drone_wrt_gate[ids_gate_passed] = new_pose[:, 0]
+
+        # For envs that did NOT pass a gate this step, just store current_x
+        not_passed_mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        not_passed_mask[ids_gate_passed] = False
+        self.env._prev_x_drone_wrt_gate[not_passed_mask] = current_x[not_passed_mask]
 
         distance_to_gate = torch.linalg.norm(
             self.env._desired_pos_w[:, :2] - self.env._robot.data.root_link_pos_w[:, :2], dim=1
@@ -243,7 +324,7 @@ class DefaultQuadcopterStrategy:
                 # "height": -height_penalty * self.env.rew["height_reward_scale"],
                 "wrong_direction": -wrong_direction_penalty * self.env.rew['wrong_direction_reward_scale'],
                 "low_altitude": -downward_velocity_penalty * self.env.rew["low_altitude_reward_scale"],
-                "ctrl_penalty": -ctrl_penalty * self.env.rew["ctrl_reward_scale"],
+                "ctrl": -ctrl_penalty * self.env.rew["ctrl_reward_scale"],
             }
             
             reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
@@ -359,9 +440,10 @@ class DefaultQuadcopterStrategy:
         self.env._robot.reset(env_ids)
 
         # domain randomization
-        if self.cfg.is_train:
-            # self._randomize_dynamics(env_ids)
-            self._randomize_domain(env_ids, self.cfg.randomize_domain)
+        # if self.cfg.is_train:
+        #     # self._randomize_dynamics(env_ids)
+        #     self._randomize_domain(env_ids, self.cfg.randomize_domain)
+        self._randomize_domain(env_ids, self.cfg.randomize_domain)
 
         
         if not self.env._models_paths_initialized:
@@ -503,7 +585,9 @@ class DefaultQuadcopterStrategy:
             self.env._robot.data.root_link_state_w[env_ids, :3]
         )
 
-        self.env._prev_x_drone_wrt_gate[env_ids] = -1.0  # Initialize behind gate
+        # self.env._prev_x_drone_wrt_gate[env_ids] = -1.0  # Initialize behind gate
+        self.env._prev_x_drone_wrt_gate[env_ids] = -x_local  # Initialize behind gate
+
 
         self.env._crashed[env_ids] = 0
 
